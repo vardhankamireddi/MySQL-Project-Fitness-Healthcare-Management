@@ -1,0 +1,788 @@
+mysql> create database fitness_healthcare_db;
+Query OK, 1 row affected (0.01 sec)
+
+mysql> use fitness_healthcare_db;
+Database changed
+mysql> CREATE TABLE trainers (
+    ->     trainer_id     INT AUTO_INCREMENT PRIMARY KEY,
+    ->     trainer_name   VARCHAR(50) NOT NULL,
+    ->     specialization VARCHAR(40) NOT NULL,
+    ->     email          VARCHAR(60) NOT NULL UNIQUE,
+    ->     mentor_id      INT NULL,                                   -- self reference
+    ->     FOREIGN KEY (mentor_id) REFERENCES trainers(trainer_id)
+    -> );
+Query OK, 0 rows affected (0.10 sec)
+
+mysql>
+mysql> CREATE TABLE users (
+    ->     user_id        INT AUTO_INCREMENT PRIMARY KEY,
+    ->     first_name     VARCHAR(30) NOT NULL,
+    ->     last_name      VARCHAR(30) NOT NULL,
+    ->     email          VARCHAR(60) NOT NULL UNIQUE,
+    ->     gender         ENUM('Male','Female') NOT NULL,
+    ->     dob            DATE NOT NULL,
+    ->     height_cm      DECIMAL(5,2) NOT NULL CHECK (height_cm BETWEEN 100 AND 250),
+    ->     weight_kg      DECIMAL(5,2) NOT NULL CHECK (weight_kg BETWEEN 20 AND 300),
+    ->     bmi            DECIMAL(5,2) NULL,                          -- filled by trigger
+    ->     activity_level ENUM('Sedentary','Light','Moderate','Active','Very Active') DEFAULT 'Light',
+    ->     goal           ENUM('Weight Loss','Muscle Gain','Maintain Fitness','Endurance') NOT NULL,
+    ->     plan           ENUM('Basic','Standard','Premium') DEFAULT 'Basic',
+    ->     trainer_id     INT NULL,
+    ->     status         ENUM('Active','Inactive') DEFAULT 'Active',
+    ->     FOREIGN KEY (trainer_id) REFERENCES trainers(trainer_id) ON DELETE SET NULL
+    -> );
+Query OK, 0 rows affected (0.08 sec)
+
+mysql>
+mysql> CREATE TABLE exercises (
+    ->     exercise_id      INT AUTO_INCREMENT PRIMARY KEY,
+    ->     exercise_name    VARCHAR(40) NOT NULL UNIQUE,
+    ->     category         VARCHAR(20) NOT NULL,
+    ->     calories_per_min DECIMAL(4,1) NOT NULL
+    -> );
+Query OK, 0 rows affected (0.06 sec)
+
+mysql> CREATE TABLE workouts (
+    ->     workout_id   INT AUTO_INCREMENT PRIMARY KEY,
+    ->     user_id      INT NOT NULL,
+    ->     exercise_id  INT NOT NULL,
+    ->     workout_date DATE NOT NULL,
+    ->     minutes      INT NOT NULL CHECK (minutes > 0),
+    ->     FOREIGN KEY (user_id)     REFERENCES users(user_id) ON DELETE CASCADE,
+    ->     FOREIGN KEY (exercise_id) REFERENCES exercises(exercise_id)
+    -> );
+Query OK, 0 rows affected (0.04 sec)
+
+mysql>
+mysql> CREATE TABLE food_items (
+    ->     food_id   INT AUTO_INCREMENT PRIMARY KEY,
+    ->     food_name VARCHAR(40) NOT NULL UNIQUE,
+    ->     calories  INT NOT NULL,
+    ->     protein_g DECIMAL(5,1) NOT NULL
+    -> );
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> CREATE TABLE meal_logs (
+    ->     meal_id   INT AUTO_INCREMENT PRIMARY KEY,
+    ->     user_id   INT NOT NULL,
+    ->     food_id   INT NOT NULL,
+    ->     meal_date DATE NOT NULL,
+    ->     meal_type ENUM('Breakfast','Lunch','Snack','Dinner') NOT NULL,
+    ->     quantity  DECIMAL(3,1) NOT NULL DEFAULT 1,
+    ->     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    ->     FOREIGN KEY (food_id) REFERENCES food_items(food_id)
+    -> );
+Query OK, 0 rows affected (0.09 sec)
+
+mysql>
+mysql> CREATE TABLE health_metrics (
+    ->     metric_id   INT AUTO_INCREMENT PRIMARY KEY,
+    ->     user_id     INT NOT NULL,
+    ->     record_date DATE NOT NULL,
+    ->     weight_kg   DECIMAL(5,2) NOT NULL,
+    ->     heart_rate  INT NULL,
+    ->     sleep_hours DECIMAL(3,1) NULL,
+    ->     UNIQUE (user_id, record_date),
+    ->     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    -> );
+Query OK, 0 rows affected (0.04 sec)
+
+mysql>
+mysql> CREATE TABLE payments (
+    ->     payment_id   INT AUTO_INCREMENT PRIMARY KEY,
+    ->     user_id      INT NOT NULL,
+    ->     plan         ENUM('Basic','Standard','Premium') NOT NULL,
+    ->     amount       DECIMAL(8,2) NOT NULL CHECK (amount > 0),
+    ->     payment_date DATE NOT NULL,
+    ->     payment_mode ENUM('UPI','Card','Cash','NetBanking') NOT NULL,
+    ->     pay_status   ENUM('Success','Failed','Pending') NOT NULL DEFAULT 'Success',
+    ->     FOREIGN KEY (user_id) REFERENCES users(user_id)
+    -> );
+Query OK, 0 rows affected (0.04 sec)
+
+mysql> ALTER TABLE users ADD COLUMN phone VARCHAR(15);
+Query OK, 0 rows affected (0.08 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> ALTER TABLE users MODIFY COLUMN phone VARCHAR(12);
+Query OK, 0 rows affected (0.08 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> ALTER TABLE users DROP COLUMN phone;
+Query OK, 0 rows affected (0.08 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> CREATE INDEX idx_workout_user ON workouts (user_id, workout_date);
+Query OK, 0 rows affected (0.02 sec)
+Records: 0  Duplicates: 0  Warnings: 0
+
+mysql> DELIMITER $$
+mysql>
+mysql> CREATE FUNCTION calculate_bmi(w DECIMAL(5,2), h DECIMAL(5,2)) RETURNS DECIMAL(5,2)
+    -> DETERMINISTIC
+    -> BEGIN
+    ->     RETURN ROUND(w / POW(h / 100, 2), 2);
+    -> END$$
+Query OK, 0 rows affected (0.02 sec)
+
+mysql>
+mysql> CREATE FUNCTION bmi_category(b DECIMAL(5,2)) RETURNS VARCHAR(20)
+    -> DETERMINISTIC
+    -> BEGIN
+    ->     RETURN CASE WHEN b < 18.5 THEN 'Underweight' WHEN b < 25 THEN 'Normal'
+    ->                 WHEN b < 30 THEN 'Overweight' ELSE 'Obese' END;
+    -> END$$
+Query OK, 0 rows affected (0.01 sec)
+
+mysql>
+mysql> CREATE TRIGGER trg_bmi_insert BEFORE INSERT ON users FOR EACH ROW
+    -> BEGIN
+    ->     SET NEW.bmi = calculate_bmi(NEW.weight_kg, NEW.height_cm);
+    -> END$$
+Query OK, 0 rows affected (0.01 sec)
+
+mysql>
+mysql> CREATE TRIGGER trg_bmi_update BEFORE UPDATE ON users FOR EACH ROW
+    -> BEGIN
+    ->     SET NEW.bmi = calculate_bmi(NEW.weight_kg, NEW.height_cm);
+    -> END$$
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> CREATE TRIGGER trg_weight_history AFTER UPDATE ON users FOR EACH ROW
+    -> BEGIN
+    ->     IF OLD.weight_kg <> NEW.weight_kg THEN
+    ->         INSERT INTO health_metrics (user_id, record_date, weight_kg)
+    ->         VALUES (NEW.user_id, CURDATE(), NEW.weight_kg)
+    ->         ON DUPLICATE KEY UPDATE weight_kg = NEW.weight_kg;
+    ->     END IF;
+    -> END$$
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> CREATE TRIGGER trg_metrics_check BEFORE INSERT ON health_metrics FOR EACH ROW
+    -> BEGIN
+    ->     IF NEW.sleep_hours > 24 THEN
+    ->         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Sleep hours cannot be more than 24';
+    ->     END IF;
+    -> END$$
+Query OK, 0 rows affected (0.01 sec)
+
+mysql>
+mysql> DELIMITER ;
+mysql>
+mysql> INSERT INTO trainers (trainer_name, specialization, email, mentor_id) VALUES
+    -> ('Rahul Verma',  'Weight Training', 'rahul@fitlife.com',  NULL),
+    -> ('Anjali Mehta', 'Yoga',            'anjali@fitlife.com', 1),
+    -> ('Karthik Rao',  'Cardio',          'karthik@fitlife.com', 1),
+    -> ('Sowmya Iyer',  'Nutrition',       'sowmya@fitlife.com', 2);
+Query OK, 4 rows affected (0.02 sec)
+Records: 4  Duplicates: 0  Warnings: 0
+
+mysql>
+mysql> INSERT INTO users (first_name,last_name,email,gender,dob,height_cm,weight_kg,activity_level,goal,plan,trainer_id,status) VALUES
+    -> ('Ravi',   'Kumar',   'ravi@mail.com',   'Male',  '2000-05-12', 175, 82, 'Moderate',    'Weight Loss',     'Standard', 1,    'Active'),
+    -> ('Sneha',  'Reddy',   'sneha@mail.com',  'Female','1999-08-21', 162, 68, 'Light',       'Weight Loss',     'Basic',    2,    'Active'),
+    -> ('Arjun',  'Varma',   'arjun@mail.com',  'Male',  '1995-01-15', 180, 90, 'Sedentary',   'Weight Loss',     'Premium',  1,    'Active'),
+    -> ('Priya',  'Sharma',  'priya@mail.com',  'Female','2001-03-30', 158, 52, 'Active',      'Muscle Gain',     'Standard', 3,    'Active'),
+    -> ('Kiran',  'Babu',    'kiran@mail.com',  'Male',  '1998-11-05', 170, 75, 'Moderate',    'Maintain Fitness','Basic',    2,    'Active'),
+    -> ('Divya',  'Lakshmi', 'divya@mail.com',  'Female','1997-07-19', 165, 78, 'Light',       'Weight Loss',     'Premium',  4,    'Active'),
+    -> ('Mahesh', 'Naidu',   'mahesh@mail.com', 'Male',  '1992-09-09', 172, 95, 'Sedentary',   'Weight Loss',     'Standard', 1,    'Active'),
+    -> ('Anitha', 'Rao',     'anitha@mail.com', 'Female','2002-12-01', 160, 48, 'Active',      'Muscle Gain',     'Basic',    3,    'Active'),
+    -> ('Suresh', 'Goud',    'suresh@mail.com', 'Male',  '1990-04-25', 178, 70, 'Very Active', 'Endurance',       'Premium',  NULL, 'Active'),
+    -> ('Harika', 'Devi',    'harika@mail.com', 'Female','2000-06-14', 155, 60, 'Moderate',    'Maintain Fitness','Basic',    NULL, 'Inactive');
+Query OK, 10 rows affected (0.01 sec)
+Records: 10  Duplicates: 0  Warnings: 0
+
+mysql>
+mysql> INSERT INTO exercises (exercise_name, category, calories_per_min) VALUES
+    -> ('Running','Cardio',10), ('Cycling','Cardio',8), ('Skipping','Cardio',12), ('Push-ups','Strength',7),
+    -> ('Squats','Strength',8), ('Deadlift','Strength',9), ('Yoga','Flexibility',3), ('Burpees','HIIT',14);
+Query OK, 8 rows affected (0.01 sec)
+Records: 8  Duplicates: 0  Warnings: 0
+
+mysql>
+mysql> INSERT INTO workouts (user_id, exercise_id, workout_date, minutes) VALUES
+    -> (1,1,'2026-09-01',30),(1,2,'2026-09-03',25),(1,1,'2026-09-08',35),(2,7,'2026-09-02',40),(2,2,'2026-09-09',30),
+    -> (3,2,'2026-09-04',20),(3,1,'2026-09-11',25),(4,5,'2026-09-02',30),(4,6,'2026-09-05',25),(4,4,'2026-09-10',20),
+    -> (5,1,'2026-09-06',30),(5,5,'2026-09-12',20),(6,7,'2026-09-03',45),(6,2,'2026-09-10',30),(7,2,'2026-09-07',20),
+    -> (8,4,'2026-09-04',25),(8,5,'2026-09-11',30),(9,1,'2026-09-05',60),(9,8,'2026-09-12',20),(9,3,'2026-09-14',30);
+Query OK, 20 rows affected (0.00 sec)
+Records: 20  Duplicates: 0  Warnings: 0
+
+mysql>
+mysql> INSERT INTO food_items (food_name, calories, protein_g) VALUES
+    -> ('Idli (2 pcs)',120,4), ('Dosa',168,4), ('Oats Porridge',150,5), ('Boiled Egg',78,6.3),
+    -> ('Chicken Curry',240,25), ('Rice (1 cup)',205,4.2), ('Banana',105,1.3), ('Protein Shake',130,24);
+Query OK, 8 rows affected (0.01 sec)
+Records: 8  Duplicates: 0  Warnings: 0
+
+mysql>
+mysql> INSERT INTO meal_logs (user_id, food_id, meal_date, meal_type, quantity) VALUES
+    -> (1,3,'2026-10-01','Breakfast',1),(1,5,'2026-10-01','Lunch',1),(1,6,'2026-10-01','Lunch',1.5),
+    -> (2,1,'2026-10-01','Breakfast',2),(2,6,'2026-10-01','Lunch',1),(3,2,'2026-10-01','Breakfast',1),
+    -> (3,5,'2026-10-01','Dinner',1.5),(4,4,'2026-10-01','Breakfast',3),(4,8,'2026-10-01','Snack',1),
+    -> (4,5,'2026-10-01','Lunch',1),(5,3,'2026-10-02','Breakfast',1),(5,7,'2026-10-02','Snack',1),
+    -> (6,1,'2026-10-02','Breakfast',2),(7,2,'2026-10-02','Breakfast',2),(7,6,'2026-10-02','Lunch',2),
+    -> (8,4,'2026-10-02','Breakfast',2),(8,8,'2026-10-02','Snack',1),(9,3,'2026-10-02','Breakfast',1),
+    -> (9,5,'2026-10-02','Dinner',1);
+Query OK, 19 rows affected (0.01 sec)
+Records: 19  Duplicates: 0  Warnings: 0
+
+mysql>
+mysql> INSERT INTO health_metrics (user_id, record_date, weight_kg, heart_rate, sleep_hours) VALUES
+    -> (1,'2026-09-15',83.5,72,6.5),(1,'2026-09-22',82.7,70,7.0),(1,'2026-09-29',82.0,70,7.5),
+    -> (2,'2026-09-15',69.2,76,6.0),(2,'2026-09-22',68.6,74,6.5),(2,'2026-09-29',68.0,74,7.0),
+    -> (3,'2026-09-15',92.0,80,5.5),(3,'2026-09-22',91.0,78,6.0),(3,'2026-09-29',90.0,78,6.5),
+    -> (4,'2026-09-15',51.0,68,7.5),(4,'2026-09-22',51.5,66,8.0),(4,'2026-09-29',52.0,66,8.0),
+    -> (5,'2026-09-15',75.2,70,7.0),(5,'2026-09-22',75.0,70,7.0),(5,'2026-09-29',75.0,69,7.5),
+    -> (6,'2026-09-15',79.5,78,6.5),(6,'2026-09-22',78.7,76,6.5),(6,'2026-09-29',78.0,75,7.0),
+    -> (7,'2026-09-15',97.0,84,5.5),(7,'2026-09-22',96.0,82,6.0),(7,'2026-09-29',95.0,82,6.0),
+    -> (8,'2026-09-15',47.0,66,7.5),(8,'2026-09-22',47.5,66,8.0),(8,'2026-09-29',48.0,65,8.0),
+    -> (9,'2026-09-15',70.5,58,7.0),(9,'2026-09-22',70.2,57,7.5),(9,'2026-09-29',70.0,56,7.5);
+Query OK, 27 rows affected (0.01 sec)
+Records: 27  Duplicates: 0  Warnings: 0
+
+mysql>
+mysql> INSERT INTO payments (user_id, plan, amount, payment_date, payment_mode, pay_status) VALUES
+    -> (1,'Standard',1299,'2026-06-01','UPI','Success'),   (2,'Basic',499,'2026-06-10','Card','Success'),
+    -> (3,'Premium',4499,'2026-05-20','NetBanking','Success'), (4,'Standard',1299,'2026-06-15','UPI','Success'),
+    -> (5,'Basic',499,'2026-07-01','Cash','Success'),      (6,'Premium',4499,'2026-05-25','Card','Success'),
+    -> (7,'Standard',1299,'2026-07-12','UPI','Success'),   (8,'Basic',499,'2026-07-20','UPI','Success'),
+    -> (9,'Premium',4499,'2026-05-10','Card','Success'),   (10,'Basic',499,'2026-08-01','UPI','Failed');
+Query OK, 10 rows affected (0.01 sec)
+Records: 10  Duplicates: 0  Warnings: 0
+
+mysql>
+mysql> UPDATE users SET weight_kg = 81.20 WHERE user_id = 1;
+Query OK, 1 row affected (0.00 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+mysql> UPDATE users SET activity_level = 'Active' WHERE user_id = 5;
+Query OK, 1 row affected (0.00 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+mysql> INSERT INTO users (first_name,last_name,email,gender,dob,height_cm,weight_kg,goal)
+    -> VALUES ('Temp','User','temp@mail.com','Male','2000-01-01',170,70,'Weight Loss');
+Query OK, 1 row affected (0.00 sec)
+
+mysql> DELETE FROM users WHERE email = 'temp@mail.com';
+Query OK, 1 row affected (0.02 sec)
+
+mysql> CREATE VIEW v_user_profile AS
+    -> SELECT u.user_id, CONCAT(u.first_name,' ',u.last_name) AS full_name,
+    ->        TIMESTAMPDIFF(YEAR, u.dob, CURDATE()) AS age, u.weight_kg, u.bmi,
+    ->        bmi_category(u.bmi) AS bmi_category, u.goal, u.plan, t.trainer_name
+    -> FROM users u LEFT JOIN trainers t ON u.trainer_id = t.trainer_id;
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> CREATE VIEW v_workout_calories AS
+    -> SELECT w.workout_id, w.user_id, e.exercise_name, w.workout_date, w.minutes,
+    ->        w.minutes * e.calories_per_min AS calories_burned
+    -> FROM workouts w JOIN exercises e ON w.exercise_id = e.exercise_id;
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> CREATE VIEW v_daily_nutrition AS
+    -> SELECT m.user_id, m.meal_date, SUM(f.calories * m.quantity) AS total_calories,
+    ->        SUM(f.protein_g * m.quantity) AS total_protein
+    -> FROM meal_logs m JOIN food_items f ON m.food_id = f.food_id GROUP BY m.user_id, m.meal_date;
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> SELECT * FROM v_user_profile;
++---------+---------------+------+-----------+-------+--------------+------------------+----------+--------------+
+| user_id | full_name     | age  | weight_kg | bmi   | bmi_category | goal             | plan     | trainer_name |
++---------+---------------+------+-----------+-------+--------------+------------------+----------+--------------+
+|       1 | Ravi Kumar    |   26 |     81.20 | 26.51 | Overweight   | Weight Loss      | Standard | Rahul Verma  |
+|       2 | Sneha Reddy   |   27 |     68.00 | 25.91 | Overweight   | Weight Loss      | Basic    | Anjali Mehta |
+|       3 | Arjun Varma   |   31 |     90.00 | 27.78 | Overweight   | Weight Loss      | Premium  | Rahul Verma  |
+|       4 | Priya Sharma  |   25 |     52.00 | 20.83 | Normal       | Muscle Gain      | Standard | Karthik Rao  |
+|       5 | Kiran Babu    |   27 |     75.00 | 25.95 | Overweight   | Maintain Fitness | Basic    | Anjali Mehta |
+|       6 | Divya Lakshmi |   29 |     78.00 | 28.65 | Overweight   | Weight Loss      | Premium  | Sowmya Iyer  |
+|       7 | Mahesh Naidu  |   34 |     95.00 | 32.11 | Obese        | Weight Loss      | Standard | Rahul Verma  |
+|       8 | Anitha Rao    |   23 |     48.00 | 18.75 | Normal       | Muscle Gain      | Basic    | Karthik Rao  |
+|       9 | Suresh Goud   |   36 |     70.00 | 22.09 | Normal       | Endurance        | Premium  | NULL         |
+|      10 | Harika Devi   |   26 |     60.00 | 24.97 | Normal       | Maintain Fitness | Basic    | NULL         |
++---------+---------------+------+-----------+-------+--------------+------------------+----------+--------------+
+10 rows in set (0.00 sec)
+
+mysql> SELECT user_id, SUM(calories_burned) AS total_burned FROM v_workout_calories GROUP BY user_id;
++---------+--------------+
+| user_id | total_burned |
++---------+--------------+
+|       1 |        850.0 |
+|       3 |        410.0 |
+|       5 |        460.0 |
+|       9 |       1240.0 |
+|       2 |        360.0 |
+|       6 |        375.0 |
+|       7 |        160.0 |
+|       4 |        605.0 |
+|       8 |        415.0 |
++---------+--------------+
+9 rows in set (0.00 sec)
+
+mysql> SELECT * FROM v_daily_nutrition WHERE user_id = 1;
++---------+------------+----------------+---------------+
+| user_id | meal_date  | total_calories | total_protein |
++---------+------------+----------------+---------------+
+|       1 | 2026-10-01 |          697.5 |         36.30 |
++---------+------------+----------------+---------------+
+1 row in set (0.00 sec)
+
+mysql> DELIMITER $$
+mysql>
+mysql>
+mysql> CREATE PROCEDURE recommend_plan(IN p_user_id INT)
+    -> BEGIN
+    ->     SELECT first_name, bmi, bmi_category(bmi) AS bmi_category, goal,
+    ->         CASE goal
+    ->             WHEN 'Weight Loss'  THEN '30-45 min cardio, 5 days a week + light strength'
+    ->             WHEN 'Muscle Gain'  THEN 'Strength training 4-5 days (squats, deadlift, push-ups)'
+    ->             WHEN 'Endurance'    THEN 'Long runs and interval training 4 days a week'
+    ->             ELSE 'Mixed: 3 days cardio + 2 days strength + 1 day yoga' END AS workout_plan,
+    ->         CASE bmi_category(bmi)
+    ->             WHEN 'Underweight' THEN 'Calorie surplus: eggs, rice, nuts, protein shake'
+    ->             WHEN 'Normal'      THEN 'Balanced diet: dal, chapati, vegetables, fruits'
+    ->             WHEN 'Overweight'  THEN 'Calorie deficit: oats, salad, dal, avoid fried snacks'
+    ->             ELSE 'Low-calorie high-protein diet, consult a doctor' END AS diet_plan
+    ->     FROM users WHERE user_id = p_user_id;
+    -> END$$
+Query OK, 0 rows affected (0.01 sec)
+
+mysql>
+mysql>
+mysql> CREATE PROCEDURE sp_calories_report()
+    -> BEGIN
+    ->     DECLARE v_id INT;
+    ->     DECLARE v_name VARCHAR(30);
+    ->     DECLARE v_cal DECIMAL(8,1);
+    ->     DECLARE v_done INT DEFAULT 0;
+    ->     DECLARE cur CURSOR FOR SELECT user_id, first_name FROM users WHERE status = 'Active';
+    ->     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
+    ->
+    ->     DROP TEMPORARY TABLE IF EXISTS tmp_report;
+    ->     CREATE TEMPORARY TABLE tmp_report (user_id INT, first_name VARCHAR(30), calories_burned DECIMAL(8,1));
+    ->
+    ->     OPEN cur;
+    ->     read_loop: LOOP
+    ->         FETCH cur INTO v_id, v_name;
+    ->         IF v_done = 1 THEN LEAVE read_loop; END IF;
+    ->         SELECT IFNULL(SUM(calories_burned), 0) INTO v_cal FROM v_workout_calories WHERE user_id = v_id;
+    ->         INSERT INTO tmp_report VALUES (v_id, v_name, v_cal);
+    ->     END LOOP;
+    ->     CLOSE cur;
+    ->
+    ->     SELECT * FROM tmp_report ORDER BY calories_burned DESC;
+    -> END$$
+Query OK, 0 rows affected (0.00 sec)
+
+mysql>
+mysql>
+mysql> CREATE PROCEDURE sp_buy_plan(IN p_user_id INT, IN p_plan VARCHAR(10), IN p_mode VARCHAR(10))
+    -> BEGIN
+    ->     DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    ->     BEGIN
+    ->         ROLLBACK;
+    ->         SELECT 'FAILED : rolled back' AS result;
+    ->     END;
+    ->     START TRANSACTION;
+    ->         INSERT INTO payments (user_id, plan, amount, payment_date, payment_mode)
+    ->         VALUES (p_user_id, p_plan,
+    ->                 CASE p_plan WHEN 'Basic' THEN 499 WHEN 'Standard' THEN 1299 ELSE 4499 END,
+    ->                 CURDATE(), p_mode);
+    ->         UPDATE users SET plan = p_plan, status = 'Active' WHERE user_id = p_user_id;
+    ->     COMMIT;
+    ->     SELECT 'SUCCESS : plan activated' AS result;
+    -> END$$
+Query OK, 0 rows affected (0.00 sec)
+
+mysql>
+mysql> DELIMITER ;
+mysql>
+mysql> ^C
+mysql> CALL recommend_plan(7);
++------------+-------+--------------+-------------+--------------------------------------------------+-------------------------------------------------+
+| first_name | bmi   | bmi_category | goal        | workout_plan                                     | diet_plan                                       |
++------------+-------+--------------+-------------+--------------------------------------------------+-------------------------------------------------+
+| Mahesh     | 32.11 | Obese        | Weight Loss | 30-45 min cardio, 5 days a week + light strength | Low-calorie high-protein diet, consult a doctor |
++------------+-------+--------------+-------------+--------------------------------------------------+-------------------------------------------------+
+1 row in set (0.00 sec)
+
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> CALL sp_calories_report();
++---------+------------+-----------------+
+| user_id | first_name | calories_burned |
++---------+------------+-----------------+
+|       9 | Suresh     |          1240.0 |
+|       1 | Ravi       |           850.0 |
+|       4 | Priya      |           605.0 |
+|       5 | Kiran      |           460.0 |
+|       8 | Anitha     |           415.0 |
+|       3 | Arjun      |           410.0 |
+|       6 | Divya      |           375.0 |
+|       2 | Sneha      |           360.0 |
+|       7 | Mahesh     |           160.0 |
++---------+------------+-----------------+
+9 rows in set (0.02 sec)
+
+Query OK, 0 rows affected (0.03 sec)
+
+mysql> CALL sp_buy_plan(10, 'Standard', 'UPI');
++--------------------------+
+| result                   |
++--------------------------+
+| SUCCESS : plan activated |
++--------------------------+
+1 row in set (0.01 sec)
+
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> START TRANSACTION;
+Query OK, 0 rows affected (0.00 sec)
+
+mysql>
+mysql> UPDATE users SET weight_kg = 80.50 WHERE user_id = 1;
+Query OK, 1 row affected (0.02 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+mysql> COMMIT;
+Query OK, 0 rows affected (0.00 sec)
+
+mysql>
+mysql> START TRANSACTION;
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> DELETE FROM payments WHERE pay_status = 'Failed';
+Query OK, 1 row affected (0.00 sec)
+
+mysql> ROLLBACK;
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> START TRANSACTION;
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> UPDATE users SET weight_kg = 67.50 WHERE user_id = 2;
+Query OK, 1 row affected (0.00 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+mysql> SAVEPOINT s1;
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> UPDATE users SET weight_kg = 99.00 WHERE user_id = 2;
+Query OK, 1 row affected (0.00 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+mysql> ROLLBACK TO SAVEPOINT s1;
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> COMMIT;
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> DROP USER IF EXISTS 'trainer_user'@'localhost';
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> DROP USER IF EXISTS 'admin_user'@'localhost';
+Query OK, 0 rows affected (0.02 sec)
+
+mysql>
+mysql> DROP ROLE IF EXISTS 'fitness_admin';
+Query OK, 0 rows affected (0.01 sec)
+
+mysql>
+mysql> CREATE USER 'trainer_user'@'localhost' IDENTIFIED BY 'Trainer@123';
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> CREATE USER 'admin_user'@'localhost'   IDENTIFIED BY 'Admin@123';
+Query OK, 0 rows affected (0.02 sec)
+
+mysql> GRANT SELECT ON fitness_healthcare_db.v_user_profile TO 'trainer_user'@'localhost';
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> GRANT SELECT, INSERT ON fitness_healthcare_db.workouts TO 'trainer_user'@'localhost';
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> REVOKE INSERT ON fitness_healthcare_db.workouts FROM 'trainer_user'@'localhost';
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> CREATE ROLE 'fitness_admin';
+Query OK, 0 rows affected (0.01 sec)
+
+mysql> GRANT ALL PRIVILEGES ON fitness_healthcare_db.* TO 'fitness_admin';
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> GRANT 'fitness_admin' TO 'admin_user'@'localhost';
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> SHOW GRANTS FOR 'trainer_user'@'localhost';
++----------------------------------------------------------------------------------------+
+| Grants for trainer_user@localhost                                                      |
++----------------------------------------------------------------------------------------+
+| GRANT USAGE ON *.* TO `trainer_user`@`localhost`                                       |
+| GRANT SELECT ON `fitness_healthcare_db`.`v_user_profile` TO `trainer_user`@`localhost` |
+| GRANT SELECT ON `fitness_healthcare_db`.`workouts` TO `trainer_user`@`localhost`       |
++----------------------------------------------------------------------------------------+
+3 rows in set (0.00 sec)
+
+mysql> EXPLAIN SELECT * FROM workouts WHERE user_id = 1;     -- uses idx_workout_user
++----+-------------+----------+------------+------+------------------+------------------+---------+-------+------+----------+-------+
+| id | select_type | table    | partitions | type | possible_keys    | key              | key_len | ref   | rows | filtered | Extra |
++----+-------------+----------+------------+------+------------------+------------------+---------+-------+------+----------+-------+
+|  1 | SIMPLE      | workouts | NULL       | ref  | idx_workout_user | idx_workout_user | 4       | const |    3 |   100.00 | NULL  |
++----+-------------+----------+------------+------+------------------+------------------+---------+-------+------+----------+-------+
+1 row in set, 1 warning (0.00 sec)
+
+mysql> SHOW TABLES;
++---------------------------------+
+| Tables_in_fitness_healthcare_db |
++---------------------------------+
+| exercises                       |
+| food_items                      |
+| health_metrics                  |
+| meal_logs                       |
+| payments                        |
+| trainers                        |
+| users                           |
+| v_daily_nutrition               |
+| v_user_profile                  |
+| v_workout_calories              |
+| workouts                        |
++---------------------------------+
+11 rows in set (0.00 sec)
+
+mysql> --QUERIES
+    -> ^C
+mysql> ^C
+mysql>  -- QUERIES
+mysql> -- Q1. Display the name, gender and status of all female users who are currently active.
+mysql> SELECT first_name, last_name, gender, status
+    -> FROM users
+    -> WHERE gender = 'Female' AND status = 'Active';
++------------+-----------+--------+--------+
+| first_name | last_name | gender | status |
++------------+-----------+--------+--------+
+| Sneha      | Reddy     | Female | Active |
+| Priya      | Sharma    | Female | Active |
+| Divya      | Lakshmi   | Female | Active |
+| Anitha     | Rao       | Female | Active |
+| Harika     | Devi      | Female | Active |
++------------+-----------+--------+--------+
+5 rows in set (0.01 sec)
+
+mysql> -- Q2. Show the name and weight of the 5 heaviest users, starting with the heaviest.
+mysql> SELECT first_name, weight_kg
+    -> FROM users
+    -> ORDER BY weight_kg DESC
+    -> LIMIT 5;
++------------+-----------+
+| first_name | weight_kg |
++------------+-----------+
+| Mahesh     |     95.00 |
+| Arjun      |     90.00 |
+| Ravi       |     80.50 |
+| Divya      |     78.00 |
+| Kiran      |     75.00 |
++------------+-----------+
+5 rows in set (0.00 sec)
+
+mysql> -- Q3. Find all users whose first name starts with the letter S.
+mysql> SELECT first_name, last_name FROM users WHERE first_name LIKE 'S%';
++------------+-----------+
+| first_name | last_name |
++------------+-----------+
+| Sneha      | Reddy     |
+| Suresh     | Goud      |
++------------+-----------+
+2 rows in set (0.00 sec)
+
+mysql> -- Q4. Show the users who have a Standard or Premium plan and whose BMI is between 25 and 30.
+mysql> SELECT first_name, plan, bmi
+    -> FROM users
+    -> WHERE plan IN ('Standard', 'Premium') AND bmi BETWEEN 25 AND 30;
++------------+----------+-------+
+| first_name | plan     | bmi   |
++------------+----------+-------+
+| Ravi       | Standard | 26.29 |
+| Arjun      | Premium  | 27.78 |
+| Divya      | Premium  | 28.65 |
++------------+----------+-------+
+3 rows in set (0.00 sec)
+
+mysql>
+mysql> -- Q5. List the users who do not have any trainer assigned.
+mysql> SELECT first_name, last_name FROM users WHERE trainer_id IS NULL;
++------------+-----------+
+| first_name | last_name |
++------------+-----------+
+| Suresh     | Goud      |
+| Harika     | Devi      |
++------------+-----------+
+2 rows in set (0.00 sec)
+
+mysql> -- Q6. Find the total number of users and the average, minimum and maximum weight of all users.
+mysql> SELECT COUNT(*) AS total_users, ROUND(AVG(weight_kg), 1) AS avg_weight,
+    ->        MIN(weight_kg) AS min_weight, MAX(weight_kg) AS max_weight
+    -> FROM users;
++-------------+------------+------------+------------+
+| total_users | avg_weight | min_weight | max_weight |
++-------------+------------+------------+------------+
+|          10 |       71.6 |      48.00 |      95.00 |
++-------------+------------+------------+------------+
+1 row in set (0.00 sec)
+
+mysql> -- Q7. Show how many users are in each plan, but only for plans that have 3 or more users.
+mysql> SELECT plan, COUNT(*) AS users_count
+    -> FROM users
+    -> GROUP BY plan
+    -> HAVING COUNT(*) >= 3;
++----------+-------------+
+| plan     | users_count |
++----------+-------------+
+| Standard |           4 |
+| Basic    |           3 |
+| Premium  |           3 |
++----------+-------------+
+3 rows in set (0.00 sec)
+
+mysql> -- Q8. Display every user along with the name of his or her trainer.
+mysql> SELECT u.first_name, t.trainer_name
+    -> FROM users u
+    -> INNER JOIN trainers t ON u.trainer_id = t.trainer_id;
++------------+--------------+
+| first_name | trainer_name |
++------------+--------------+
+| Ravi       | Rahul Verma  |
+| Arjun      | Rahul Verma  |
+| Mahesh     | Rahul Verma  |
+| Sneha      | Anjali Mehta |
+| Kiran      | Anjali Mehta |
+| Priya      | Karthik Rao  |
+| Anitha     | Karthik Rao  |
+| Divya      | Sowmya Iyer  |
++------------+--------------+
+8 rows in set (0.00 sec)
+
+mysql> -- Q9. Show how many workouts each user has done, including users who have done none (count 0).
+mysql> SELECT u.first_name, COUNT(w.workout_id) AS workouts_done
+    -> FROM users u
+    -> LEFT JOIN workouts w ON u.user_id = w.user_id
+    -> GROUP BY u.user_id, u.first_name;
++------------+---------------+
+| first_name | workouts_done |
++------------+---------------+
+| Ravi       |             3 |
+| Sneha      |             2 |
+| Arjun      |             2 |
+| Priya      |             3 |
+| Kiran      |             2 |
+| Divya      |             2 |
+| Mahesh     |             1 |
+| Anitha     |             2 |
+| Suresh     |             3 |
+| Harika     |             0 |
++------------+---------------+
+10 rows in set (0.00 sec)
+
+mysql>
+mysql> -- Q10. Show the 5 workouts with the highest calories burned, with user name, exercise name and minutes.
+mysql> SELECT u.first_name, e.exercise_name, w.minutes,
+    ->        w.minutes * e.calories_per_min AS calories_burned
+    -> FROM workouts w
+    -> JOIN users u     ON w.user_id = u.user_id
+    -> JOIN exercises e ON w.exercise_id = e.exercise_id
+    -> ORDER BY calories_burned DESC
+    -> LIMIT 5;
++------------+---------------+---------+-----------------+
+| first_name | exercise_name | minutes | calories_burned |
++------------+---------------+---------+-----------------+
+| Suresh     | Running       |      60 |           600.0 |
+| Suresh     | Skipping      |      30 |           360.0 |
+| Ravi       | Running       |      35 |           350.0 |
+| Ravi       | Running       |      30 |           300.0 |
+| Kiran      | Running       |      30 |           300.0 |
++------------+---------------+---------+-----------------+
+5 rows in set (0.00 sec)
+
+mysql> -- Q11. Find the users whose weight is more than the average weight of all users.
+mysql> SELECT first_name, weight_kg
+    -> FROM users
+    -> WHERE weight_kg > (SELECT AVG(weight_kg) FROM users);
++------------+-----------+
+| first_name | weight_kg |
++------------+-----------+
+| Ravi       |     80.50 |
+| Arjun      |     90.00 |
+| Kiran      |     75.00 |
+| Divya      |     78.00 |
+| Mahesh     |     95.00 |
++------------+-----------+
+5 rows in set (0.01 sec)
+
+mysql> -- Q12. Find the users who have never logged any meal.
+mysql> SELECT first_name FROM users
+    -> WHERE user_id NOT IN (SELECT user_id FROM meal_logs);
++------------+
+| first_name |
++------------+
+| Harika     |
++------------+
+1 row in set (0.00 sec)
+
+mysql> -- Q13. Show the latest recorded weight of each user from the health records.
+mysql> SELECT u.first_name,
+    ->        (SELECT h.weight_kg FROM health_metrics h
+    ->         WHERE h.user_id = u.user_id
+    ->         ORDER BY h.record_date DESC LIMIT 1) AS latest_weight
+    -> FROM users u;
++------------+---------------+
+| first_name | latest_weight |
++------------+---------------+
+| Ravi       |         80.50 |
+| Sneha      |         67.50 |
+| Arjun      |         90.00 |
+| Priya      |         52.00 |
+| Kiran      |         75.00 |
+| Divya      |         78.00 |
+| Mahesh     |         95.00 |
+| Anitha     |         48.00 |
+| Suresh     |         70.00 |
+| Harika     |          NULL |
++------------+---------------+
+10 rows in set (0.00 sec)
+
+mysql> -- Q14. Show every trainer along with the name of his or her mentor.
+mysql> SELECT t.trainer_name AS trainer, m.trainer_name AS mentor
+    -> FROM trainers t
+    -> LEFT JOIN trainers m ON t.mentor_id = m.trainer_id;
++--------------+--------------+
+| trainer      | mentor       |
++--------------+--------------+
+| Rahul Verma  | NULL         |
+| Anjali Mehta | Rahul Verma  |
+| Karthik Rao  | Rahul Verma  |
+| Sowmya Iyer  | Anjali Mehta |
++--------------+--------------+
+4 rows in set (0.00 sec)
+
+mysql> -- Q15. Show the BMI category of each user and give a short advice based on the BMI.
+mysql> SELECT first_name, bmi, bmi_category(bmi) AS category,
+    ->        CASE WHEN bmi < 18.5 THEN 'Eat more protein'
+    ->             WHEN bmi < 25   THEN 'Maintain routine'
+    ->             WHEN bmi < 30   THEN 'Add cardio'
+    ->             ELSE 'Consult a doctor' END AS advice
+    -> FROM users;
++------------+-------+------------+------------------+
+| first_name | bmi   | category   | advice           |
++------------+-------+------------+------------------+
+| Ravi       | 26.29 | Overweight | Add cardio       |
+| Sneha      | 25.72 | Overweight | Add cardio       |
+| Arjun      | 27.78 | Overweight | Add cardio       |
+| Priya      | 20.83 | Normal     | Maintain routine |
+| Kiran      | 25.95 | Overweight | Add cardio       |
+| Divya      | 28.65 | Overweight | Add cardio       |
+| Mahesh     | 32.11 | Obese      | Consult a doctor |
+| Anitha     | 18.75 | Normal     | Maintain routine |
+| Suresh     | 22.09 | Normal     | Maintain routine |
+| Harika     | 24.97 | Normal     | Maintain routine |
++------------+-------+------------+------------------+
+10 rows in set (0.00 sec)
+
+
